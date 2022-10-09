@@ -14,8 +14,8 @@
 #include <algorithm>
 #include <fstream>
 
-const uint32_t WIDTH = 1920;
-const uint32_t HEIGHT = 1080;
+const uint32_t WIDTH = 800;
+const uint32_t HEIGHT = 600;
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
 const std::vector<const char *> validationLayers = {
@@ -72,14 +72,14 @@ private:
     VkQueue m_presentQueue{}; // destroyed implicitly with the device
     VkSwapchainKHR m_swapChain{};
     std::vector<VkImage> m_swapChainImages; // cleaned up when the swap chain is destroyed
-    VkFormat m_swapChainImageFormat;
-    VkExtent2D m_swapChainExtent;
+    VkFormat m_swapChainImageFormat{};
+    VkExtent2D m_swapChainExtent{};
     std::vector<VkImageView> m_swapChainImageViews;
-    VkRenderPass m_renderPass;
-    VkPipelineLayout m_pipelineLayout;
-    VkPipeline m_graphicsPipeline;
+    VkRenderPass m_renderPass{};
+    VkPipelineLayout m_pipelineLayout{};
+    VkPipeline m_graphicsPipeline{};
     std::vector<VkFramebuffer> m_swapChainFramebuffers;
-    VkCommandPool m_commandPool;
+    VkCommandPool m_commandPool{};
     std::vector<VkCommandBuffer> m_commandBuffers; // destroyed implicitly with the command pool
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
     std::vector<VkSemaphore> m_renderFinishedSemaphores;
@@ -669,7 +669,7 @@ private:
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL; // fill triangles, otherwise use _LINE for wireframe rendering
         rasterizer.lineWidth = 1.0f;
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE; // TODO: rather switch to CCW in the future like in OpenGL...
         rasterizer.depthBiasEnable = VK_FALSE;
         rasterizer.depthBiasConstantFactor = 0.0f; // optional
         rasterizer.depthBiasClamp = 0.0f; // optional
