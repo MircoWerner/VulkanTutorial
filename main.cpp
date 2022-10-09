@@ -8,6 +8,7 @@
 #include <vector>
 #include <cstring>
 #include <optional>
+#include <set>
 
 const uint32_t WIDTH = 1920;
 const uint32_t HEIGHT = 1080;
@@ -56,9 +57,11 @@ private:
 
     VkInstance m_instance{};
     VkDebugUtilsMessengerEXT m_debugMessenger{};
+    VkSurfaceKHR m_surface{};
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE; // will be destroyed implicitly when instance is destroyed
     VkDevice m_device{};
     VkQueue m_graphicsQueue{}; // destroyed implicitly with the device
+    VkQueue m_presentQueue{};
 
     void initWindow() {
         glfwInit();
@@ -70,6 +73,7 @@ private:
     void initVulkan() {
         createInstance();
         setupDebugMessenger();
+        createSurface();
         pickPhysicalDevice();
         createLogicalDevice();
     }
@@ -82,6 +86,7 @@ private:
 
     void cleanup() {
         vkDestroyDevice(m_device, nullptr);
+        vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
         if (enableValidationLayers) {
             DestroyDebugUtilsMessengerEXT(m_instance, m_debugMessenger, nullptr);
         }
@@ -104,9 +109,10 @@ private:
 
     struct QueueFamilyIndices {
         std::optional<uint32_t> graphicsFamily;
+        std::optional<uint32_t> presentFamily;
 
         [[nodiscard]] bool isComplete() const {
-            return graphicsFamily.has_value();
+            return graphicsFamily.has_value() && presentFamily.has_value();
         }
     };
 
@@ -196,7 +202,7 @@ private:
         return extensions;
     }
 
-    void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &createInfo) {
+    static void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &createInfo) {
         createInfo = {};
         createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
         createInfo.messageSeverity =
@@ -221,6 +227,12 @@ private:
         }
     }
 
+    void createSurface() {
+        if (glfwCreateWindowSurface(m_instance, m_window, nullptr, &m_surface) != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create window surface!");
+        }
+    }
+
     void pickPhysicalDevice() {
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(m_instance, &deviceCount, nullptr);
@@ -241,7 +253,7 @@ private:
         }
     }
 
-    static bool isDeviceSuitable(VkPhysicalDevice device) {
+    bool isDeviceSuitable(VkPhysicalDevice device) {
         VkPhysicalDeviceProperties deviceProperties;
         vkGetPhysicalDeviceProperties(device, &deviceProperties);
         VkPhysicalDeviceFeatures deviceFeatures;
@@ -256,7 +268,7 @@ private:
         return indices.isComplete();
     }
 
-    static QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) {
+    QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) {
         QueueFamilyIndices indices;
 
         uint32_t queueFamilyCount = 0;
@@ -269,6 +281,11 @@ private:
             if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) { // require queue for graphics commands
                 indices.graphicsFamily = i;
             }
+            VkBool32 presentSupport = false;
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_surface, &presentSupport);
+            if (presentSupport) { // require queue to present results to screen
+                indices.presentFamily = i;
+            }
             if (indices.isComplete()) {
                 break;
             }
@@ -279,20 +296,26 @@ private:
 
     void createLogicalDevice() {
         QueueFamilyIndices indices = findQueueFamilies(m_physicalDevice);
+        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+        std::set<uint32_t> uniqueQueueFamilies = {indices.graphicsFamily.value(),
+                                                  indices.presentFamily.value()}; // if the queue families are the same, index is stored only once in the set
 
-        VkDeviceQueueCreateInfo queueCreateInfo{};
-        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
-        queueCreateInfo.queueCount = 1;
         float queuePriority = 1.0f;
-        queueCreateInfo.pQueuePriorities = &queuePriority;
+        for (uint32_t queueFamily: uniqueQueueFamilies) { // queue create infos for all required queues
+            VkDeviceQueueCreateInfo queueCreateInfo{};
+            queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queueCreateInfo.queueFamilyIndex = queueFamily;
+            queueCreateInfo.queueCount = 1;
+            queueCreateInfo.pQueuePriorities = &queuePriority;
+            queueCreateInfos.push_back(queueCreateInfo);
+        }
 
         VkPhysicalDeviceFeatures deviceFeatures{}; // no features required for now
 
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        createInfo.pQueueCreateInfos = &queueCreateInfo;
-        createInfo.queueCreateInfoCount = 1;
+        createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+        createInfo.pQueueCreateInfos = queueCreateInfos.data();
         createInfo.pEnabledFeatures = &deviceFeatures;
         createInfo.enabledExtensionCount = 0;
         if (enableValidationLayers) { // not really necessary anymore, but still good to be compatible with older implementations (no distinction between instance and device specific validation layers anymore)
@@ -305,7 +328,9 @@ private:
             throw std::runtime_error("Failed to create logical device!");
         }
 
-        vkGetDeviceQueue(m_device, indices.graphicsFamily.value(), 0, &m_graphicsQueue); // query queue to interface with
+        vkGetDeviceQueue(m_device, indices.graphicsFamily.value(), 0,
+                         &m_graphicsQueue); // query queue to interface with
+        vkGetDeviceQueue(m_device, indices.presentFamily.value(), 0, &m_presentQueue);
     }
 };
 
