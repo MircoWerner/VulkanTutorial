@@ -84,13 +84,15 @@ private:
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
     std::vector<VkSemaphore> m_renderFinishedSemaphores;
     std::vector<VkFence> m_inFlightFences;
+    bool m_framebufferResized = false;
     uint32_t m_currentFrame = 0;
 
     void initWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
         m_window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+        glfwSetWindowUserPointer(m_window, this);
+        glfwSetFramebufferSizeCallback(m_window, framebufferSizeCallback);
     }
 
     void initVulkan() {
@@ -118,22 +120,16 @@ private:
     }
 
     void cleanup() {
+        cleanupSwapChain();
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroySemaphore(m_device, m_renderFinishedSemaphores[i], nullptr);
             vkDestroySemaphore(m_device, m_imageAvailableSemaphores[i], nullptr);
             vkDestroyFence(m_device, m_inFlightFences[i], nullptr);
         }
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
-        for (auto framebuffer: m_swapChainFramebuffers) {
-            vkDestroyFramebuffer(m_device, framebuffer, nullptr);
-        }
         vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
         vkDestroyRenderPass(m_device, m_renderPass, nullptr);
-        for (auto imageView: m_swapChainImageViews) {
-            vkDestroyImageView(m_device, imageView, nullptr);
-        }
-        vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
         vkDestroyDevice(m_device, nullptr);
         vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
         if (enableValidationLayers) {
@@ -145,6 +141,33 @@ private:
         glfwTerminate();
     }
 
+    void cleanupSwapChain() {
+        for (auto framebuffer: m_swapChainFramebuffers) {
+            vkDestroyFramebuffer(m_device, framebuffer, nullptr);
+        }
+        for (auto imageView: m_swapChainImageViews) {
+            vkDestroyImageView(m_device, imageView, nullptr);
+        }
+        vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
+    }
+
+    void recreateSwapChain() {
+        int width = 0, height = 0;
+        glfwGetFramebufferSize(m_window, &width, &height);
+        while (width == 0 || height == 0) { // wait until window is not minimized anymore
+            glfwGetFramebufferSize(m_window, &width, &height);
+            glfwWaitEvents();
+        }
+
+        vkDeviceWaitIdle(m_device);
+
+        cleanupSwapChain();
+
+        createSwapChain();
+        createImageViews();
+        createFramebuffers();
+    }
+
     static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                                                         VkDebugUtilsMessageTypeFlagsEXT messageType,
                                                         const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
@@ -154,6 +177,11 @@ private:
         }
 
         return VK_FALSE;
+    }
+
+    static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
+        auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        app->m_framebufferResized = true;
     }
 
     struct QueueFamilyIndices {
@@ -894,11 +922,18 @@ private:
     void drawFrame() {
         vkWaitForFences(m_device, 1, &m_inFlightFences[m_currentFrame], VK_TRUE,
                         UINT64_MAX); // waiting for the previous frame to finish, blocks the CPU
-        vkResetFences(m_device, 1, &m_inFlightFences[m_currentFrame]);
 
         uint32_t imageIndex;
-        vkAcquireNextImageKHR(m_device, m_swapChain, UINT64_MAX, m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE,
+        VkResult result = vkAcquireNextImageKHR(m_device, m_swapChain, UINT64_MAX, m_imageAvailableSemaphores[m_currentFrame], VK_NULL_HANDLE,
                               &imageIndex); // acquire image from the swap chain, send signal to semaphore when GPU finished, blocks all following calls to the GPU, does not block the CPU
+        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+            recreateSwapChain();
+            return;
+        } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+            throw std::runtime_error("failed to acquire swap chain image!");
+        }
+
+        vkResetFences(m_device, 1, &m_inFlightFences[m_currentFrame]);
 
         vkResetCommandBuffer(m_commandBuffers[m_currentFrame], 0);
         recordCommandBuffer(m_commandBuffers[m_currentFrame], imageIndex);
@@ -935,7 +970,13 @@ private:
         presentInfo.pImageIndices = &imageIndex;
         presentInfo.pResults = nullptr; // optional
 
-        vkQueuePresentKHR(m_presentQueue, &presentInfo);
+        result = vkQueuePresentKHR(m_presentQueue, &presentInfo);
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_framebufferResized) {
+            m_framebufferResized = false;
+            recreateSwapChain();
+        } else if (result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to present swap chain image!");
+        }
 
         m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
