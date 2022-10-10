@@ -7,7 +7,8 @@ find_package(glm REQUIRED)
 find_package(Vulkan REQUIRED)
 
 set(${CMAKE_PROJECT_NAME}-SRC
-        main.cpp)
+        main.cpp
+        lib/stb/stb_image.h)
 
 add_executable(${CMAKE_PROJECT_NAME} ${${CMAKE_PROJECT_NAME}-SRC})
 
